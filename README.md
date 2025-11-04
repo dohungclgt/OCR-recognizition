@@ -48,7 +48,6 @@
 ## 🧰 **Cách cài đặt và chạy**
 
 ### 1️⃣ Clone project từ GitHub
-```bash
 git clone https://github.com/dohungclgt/ocr_app.git
 cd ocr_app
 2️⃣ Tạo môi trường ảo
@@ -61,9 +60,7 @@ pip install -r requirements.txt
 
 5️⃣ Cài đặt Tesseract OCR
 Windows:
-
 Tải và cài đặt tại: https://github.com/UB-Mannheim/tesseract/wiki
-
 Ghi nhớ đường dẫn cài đặt (ví dụ: C:\Program Files\Tesseract-OCR\tesseract.exe).
 
 6️⃣ Cấu hình biến môi trường (Windows)
@@ -82,6 +79,14 @@ Sau khi cài đặt, thêm ffmpeg vào biến môi trường PATH.
 Kiểm tra bằng:
 ffmpeg -version
 
+Cài đặt Poppler và thêm vào biến môi trường PATH
+https://poppler.freedesktop.org/
+Thêm đường dẫn vào PATH:
+Mở System Properties → Environment Variables
+Trong “System variables”, chọn “Path” → “Edit” → “New”
+Thêm:
+C:\poppler-24.08.0\Library\bin
+Kiểm tra: mở CMD và gõ pdfinfo -v
 ▶️ Chạy ứng dụng
 streamlit run app.py
 Ứng dụng sẽ tự động mở trình duyệt localhost
