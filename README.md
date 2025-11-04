@@ -46,7 +46,7 @@
 ---
 
 ## 🧰 **Cách cài đặt và chạy**
-
+``` bass
 ### 1️⃣ Clone project từ GitHub
 git clone https://github.com/dohungclgt/ocr_app.git
 cd ocr_app
