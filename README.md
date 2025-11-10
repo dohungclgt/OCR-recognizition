@@ -106,18 +106,17 @@ os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "Your key here")
 - streamlit run app.py
 - Ứng dụng sẽ tự động mở trình duyệt localhost
 - 📂 Cấu trúc thư mục
-ocr_app/
+##📦 ocr_app/
+├── 📄 app.py # Giao diện chính (Streamlit App)
+├── 📄 requirements.txt # Danh sách thư viện cần cài
+├── 📄 README.md # Hướng dẫn chi tiết (file này)
 │
-|
-│── image_to_text.py
-│── pdf_to_text.py
-│── scan_to_text.py
-│── speech_to_text.py
-│── config.py
-├── app.py
-├── requirements.txt
-├── README.md
-└──
+├── 📁 modules/ # (Tùy chọn) Thư mục chứa các module OCR
+│ ├── 📄 image_to_text.py # Xử lý OCR cho ảnh (Tesseract)
+│ ├── 📄 pdf_to_text.py # OCR PDF (Tesseract + Poppler)
+│ ├── 📄 scan_to_text.py # OCR từ webcam
+│ ├── 📄 speech_to_text.py # Nhận diện giọng nói (Google Speech / Whisper)
+│ └── 📄 smart_ai_extract.py # Phân tích văn bản bằng Google Gemini AI
 
 - ⚠️ Lưu ý:
 - Các module Scan và Speech hiện đang trong giai đoạn phát triển. (còn 1 số lỗi chưa sửa được)
