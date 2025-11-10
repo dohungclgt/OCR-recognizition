@@ -82,8 +82,9 @@ pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_PATH")
 
 - Sau khi cài đặt, thêm ffmpeg vào biến môi trường PATH.
 - Kiểm tra bằng:
-- ffmpeg -version
-
+```cmd
+ffmpeg -version
+```  
 - Cài đặt Poppler và thêm vào biến môi trường PATH
 - https://poppler.freedesktop.org/
 - Thêm đường dẫn vào PATH:
@@ -91,13 +92,15 @@ pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_PATH")
 - Trong “System variables”, chọn “Path” → “Edit” → “New”
 - Thêm:
 - C:\poppler-24.08.0\Library\bin
-- Kiểm tra: mở CMD và gõ pdfinfo -v
-
-- Bạn cần API để có thể khởi động đúng
+- Kiểm tra: mở CMD và gõ
+```cmd
+pdfinfo -v
+```
+- Bạn cần API để có thể hoạt động chính xác
 - truy cập vào: https://aistudio.google.com/api-keys để lấy key
 - Sau khi lấy, vào các thư mục như là Image_to_text, pdf_to_text...
 - Tìm dòng:
-```bash
+```python
 os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "Your key here")
 ```
 - dán key API bạn lấy vào "your key here"
@@ -105,20 +108,6 @@ os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "Your key here")
 ### ▶️ Chạy ứng dụng
 - streamlit run app.py
 - Ứng dụng sẽ tự động mở trình duyệt localhost
-## 📂 Cấu trúc thư mục
-#
-📦 ocr_app/
-├── 📄 app.py                       # Ứng dụng chính (Streamlit App)
-├── 📄 requirements.txt             # Danh sách thư viện cần cài đặt
-├── 📄 README.md                    # Hướng dẫn chi tiết (file này)
-│
-├── 📁 modules/                     # (Tùy chọn) Chứa các module OCR riêng
-│   ├── 📄 image_to_text.py         # Nhận diện chữ từ ảnh (Tesseract)
-│   ├── 📄 pdf_to_text.py           # OCR từ PDF (Tesseract + Poppler)
-│   ├── 📄 scan_to_text.py          # Nhận diện chữ từ webcam
-│   ├── 📄 speech_to_text.py        # Nhận diện giọng nói
-│   └── 📄 smart_ai_extract.py      # Phân tích văn bản bằng Google Gemini AI
-#
 
 - ⚠️ Lưu ý:
 - Các module Scan và Speech hiện đang trong giai đoạn phát triển. (còn 1 số lỗi chưa sửa được)
