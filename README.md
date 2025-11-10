@@ -105,8 +105,8 @@ os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "Your key here")
 ### ▶️ Chạy ứng dụng
 - streamlit run app.py
 - Ứng dụng sẽ tự động mở trình duyệt localhost
-- 📂 Cấu trúc thư mục
-##📦 ocr_app/
+## 📂 Cấu trúc thư mục
+📦 ocr_app/
 ├── 📄 app.py # Giao diện chính (Streamlit App)
 ├── 📄 requirements.txt # Danh sách thư viện cần cài
 ├── 📄 README.md # Hướng dẫn chi tiết (file này)
