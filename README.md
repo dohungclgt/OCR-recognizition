@@ -48,18 +48,22 @@
 ---
 
 ## 🧰 **Cách cài đặt và chạy**
- bass
 ### 1️⃣ Clone project từ GitHub
 - git clone https://github.com/dohungclgt/OCR-recognizition
 - cd ocr_app
 ### 2️⃣ Tạo môi trường ảo
-- python -m venv venv
-3️⃣ Kích hoạt môi trường ảo
+```bash
+python -m venv venv
+```
+### 3️⃣ Kích hoạt môi trường ảo
 - Windows:
-- venv\Scripts\activate
-4️⃣ Cài đặt thư viện cần thiết
-- pip install -r requirements.txt
-
+```bash
+venv\Scripts\activate
+```
+### 4️⃣ Cài đặt thư viện cần thiết
+```bash
+pip install -r requirements.txt
+```
 ### 5️⃣ Cài đặt Tesseract OCR
 - Windows:
 - Tải và cài đặt tại: https://github.com/UB-Mannheim/tesseract/wiki
@@ -106,12 +110,16 @@ os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "Your key here")
 - dán key API bạn lấy vào "your key here"
 - lưu lại
 ### ▶️ Chạy ứng dụng
-- streamlit run app.py
+- mở Terminal và gõ lệnh:
+```cmd
+streamlit run app.py
+```
 - Ứng dụng sẽ tự động mở trình duyệt localhost
 
-- ⚠️ Lưu ý:
+###⚠️ Lưu ý:
 - Các module Scan và Speech hiện đang trong giai đoạn phát triển. (còn 1 số lỗi chưa sửa được)
-- Nếu bạn gặp lỗi khi chạy phần speech, hãy đảm bảo:
+- Nếu gặp lỗi khi chạy phần speech, hãy đảm bảo:
 - ffmpeg đã được cài và thêm vào PATH.
 - File âm thanh có chất lượng rõ ràng.
 - Ngôn ngữ chọn đúng (en-US hoặc vi-VN).
+- Không tiết lộ API
