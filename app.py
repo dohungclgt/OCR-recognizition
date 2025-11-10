@@ -1,299 +1,266 @@
-# app.py — VIP UI (3 theme), giữ nguyên logic gọi các hàm OCR
+# app.py — Universal OCR App (Tesseract + Google AI Studio / Gemini)
 from io import BytesIO
-import audiorecorder
+import os
+import io
+import tempfile
+import pandas as pd
 import streamlit as st
+import audiorecorder
+from PIL import Image
+from docx import Document
+
+# ====== MODULES ======
 from image_to_text import image_to_text
 from pdf_to_text import pdf_to_text
 from scan_to_text import scan_to_text
 from speech_to_text import speech_to_text
+from smart_ai_extract import analyze_document_ai
 
-# ===================== PAGE CONFIG =====================
+# ====== GOOGLE GENAI SDK ======
+os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "your key here")
+
+try:
+    from google import genai
+    from google.genai import types as gem_types
+    _gemini_available = True
+    _gem_client = genai.Client()
+except Exception:
+    _gemini_available = False
+    _gem_client = None
+
+# ====== GEMINI HELPER ======
+def _ensure_rgb_jpeg_bytes(file_bytes: bytes, max_side: int = 2400, jpeg_quality: int = 90) -> bytes:
+    img = Image.open(BytesIO(file_bytes)).convert("RGB")
+    w, h = img.size
+    scale = min(1.0, max_side / max(w, h))
+    if scale < 1.0:
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    out = BytesIO()
+    img.save(out, format="JPEG", quality=jpeg_quality, optimize=True)
+    return out.getvalue()
+
+def _extract_text_from_resp(resp) -> str:
+    """Trích text an toàn từ phản hồi Gemini"""
+    try:
+        if getattr(resp, "text", None):
+            return resp.text.strip()
+        if getattr(resp, "candidates", None):
+            for c in resp.candidates:
+                if getattr(c, "content", None) and getattr(c.content, "parts", None):
+                    chunks = []
+                    for p in c.content.parts:
+                        if getattr(p, "text", None):
+                            chunks.append(p.text)
+                    if chunks:
+                        return "\n".join(chunks).strip()
+        return ""
+    except Exception:
+        return ""
+
+# ====== PAGE CONFIG ======
 st.set_page_config(page_title="Universal OCR App", page_icon="🧠", layout="wide")
+st.title("🧠 Universal OCR App (Tesseract + Google Gemini AI)")
 
-# ===================== SIDEBAR SETTINGS =====================
+# ====== SIDEBAR ======
 st.sidebar.header("⚙️ Settings")
+lang = st.sidebar.radio("🌐 Language / Ngôn ngữ", ["English", "Tiếng Việt"], index=1)
+engine = st.sidebar.radio("🧠 OCR Engine", ["Tesseract (Local)", "Google AI Studio (Gemini)"], index=1)
+gem_model = st.sidebar.selectbox("🤖 Gemini Model", ["gemini-2.5-flash", "gemini-2.5-pro"], index=0)
 
-# Theme switcher (chỉ là CSS thay đổi — không cần lib ngoài)
-ui_theme = st.sidebar.selectbox(
-    "🎨 Theme",
-    ["✨ Neon Cyber", "🧊 Glass Morph", "🌚 Minimal Dark"],
-    index=0
-)
+if st.sidebar.button("🔍 Test Gemini API"):
+    if not _gemini_available:
+        st.sidebar.error("❌ Chưa cài Google GenAI SDK hoặc chưa có GEMINI_API_KEY.")
+    else:
+        try:
+            ping = _gem_client.models.generate_content(model=gem_model, contents="Return READY")
+            st.sidebar.success("✅ Gemini hoạt động: " + (_extract_text_from_resp(ping) or "OK"))
+        except Exception as e:
+            st.sidebar.error(f"Lỗi Gemini: {e}")
 
-lang = st.sidebar.radio("🌐 Language / Ngôn ngữ", ["English", "Tiếng Việt"])
+modes = ["📸 Image", "📄 PDF", "📷 Scan", "🎤 Speech"] if lang == "English" else ["📸 Ảnh", "📄 PDF", "📷 Scan", "🎤 Giọng nói"]
+mode = st.sidebar.radio("🧩 " + ("Select Mode" if lang == "English" else "Chọn chế độ"), modes)
 
-if lang == "English":
-    sidebar_info = {
-        "📸 Image": "Upload an image (PNG/JPG/JPEG) to extract text using OCR.",
-        "📄 PDF": "Upload a PDF to extract text from scanned pages.",
-        "📷 Scan": "Use your webcam to scan a document.",
-        "🎤 Speech": "Record or upload audio to convert speech to text."
-    }
-else:
-    sidebar_info = {
-        "📸 Ảnh": "Tải ảnh (PNG/JPG/JPEG) để nhận diện chữ.",
-        "📄 PDF": "Tải file PDF để trích xuất chữ từ trang quét.",
-        "📷 Scan": "Dùng webcam để quét tài liệu.",
-        "🎤 Giọng nói": "Ghi âm hoặc tải file để chuyển giọng nói thành văn bản."
-    }
+# ====== HIỂN THỊ KẾT QUẢ ======
+def show_result_box(text: str, height: int = 350, filename: str = "ocr_result.txt"):
+    st.success("✅ " + ("Result:" if lang == "English" else "Kết quả:"))
+    st.text_area("Output", text, height=height)
+    st.download_button("💾 " + ("Download text" if lang == "English" else "Tải kết quả"), text, file_name=filename)
 
-mode = st.sidebar.radio(
-    "🧩 " + ("Select Mode" if lang == "English" else "Chọn chế độ"),
-    list(sidebar_info.keys())
-)
-st.sidebar.markdown("---")
-st.sidebar.subheader("ℹ️ " + ("Description" if lang == "English" else "Mô tả"))
-st.sidebar.info(sidebar_info[mode])
+# ============================================================
+# 📸 IMAGE MODE
+# ============================================================
+if mode in ["📸 Image", "📸 Ảnh"]:
+    uploaded_file = st.file_uploader("📤 " + ("Upload image" if lang == "English" else "Tải lên ảnh"),
+                                     type=["png", "jpg", "jpeg"])
+    if uploaded_file:
+        img_bytes = uploaded_file.read()
+        st.image(img_bytes, caption="🖼️ " + ("Uploaded Image" if lang == "English" else "Ảnh đã tải lên"),
+                 use_container_width=True)
 
-# ===================== THEME CSS =====================
-def inject_css(theme: str):
-    common = """
-    <style>
-    /* Global */
-    .stApp {
-      color: #eaf3ff;
-      font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
-    }
-    /* Hide default block gap a bit */
-    .block-container { padding-top: 1.2rem; }
-    /* Section Card */
-    .outer-card {
-      border-radius: 18px;
-      padding: 20px 18px;
-      border: 1px solid rgba(255,255,255,0.14);
-    }
-    /* Header title animation */
-    .title-hero {
-      text-align: center;
-      font-weight: 900;
-      font-size: 46px;
-      letter-spacing: .6px;
-      margin: 0 0 6px 0;
-      background: linear-gradient(90deg, #7af5ff, #8ef6a0, #ff93e1, #7af5ff);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-      animation: hue 9s linear infinite;
-    }
-    @keyframes hue {
-      0%{filter:hue-rotate(0deg)} 100%{filter:hue-rotate(360deg)}
-    }
-    .title-sub {
-      text-align: center;
-      color: #b9dfff;
-      margin-bottom: 1.0rem;
-      opacity: .9;
-    }
-    /* Buttons */
-    div.stButton > button {
-      width: 100% !important;
-      border-radius: 12px;
-      padding: 11px 14px;
-      font-size: 17px;
-      font-weight: 800;
-      border: 0;
-      transition: transform .15s ease, box-shadow .18s ease, opacity .2s ease;
-    }
-    div.stButton > button:hover { transform: translateY(-1px) scale(1.02); }
+        col1, col2 = st.columns(2)
+        with col1:
+            run_ocr = st.button("🧠 " + ("Tesseract OCR" if lang == "English" else "Nhận diện (Tesseract)"))
+        with col2:
+            run_ai = st.button("🤖 " + ("Gemini AI Analysis" if lang == "English" else "Phân tích thông minh (Gemini AI)"))
 
-    /* Sidebar aesthetic */
-    [data-testid="stSidebar"] {
-      border-right: 1px solid rgba(255,255,255,0.12);
-      backdrop-filter: blur(8px);
-    }
+        # --- TESSERACT ---
+        if run_ocr:
+            with st.spinner("⏳ " + ("Reading text..." if lang == "English" else "Đang nhận diện...")):
+                temp_path = "temp_image.png"
+                with open(temp_path, "wb") as f:
+                    f.write(img_bytes)
+                result = image_to_text(temp_path)
+                if result["success"]:
+                    show_result_box(result["text"], filename="ocr_image.txt")
+                else:
+                    st.error(result["message"])
 
-    /* Result box */
-    .result-box {
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.18);
-      border-radius: 12px;
-      padding: 14px;
-      white-space: pre-wrap;
-      font-size: 16px;
-      max-height: 320px;
-      overflow-y: auto;
-    }
-    .badge {
-      display:inline-block;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-weight: 700;
-      font-size: 12px;
-      letter-spacing: .3px;
-      margin: 0 6px 12px 0;
-    }
-    </style>
-    """
-    neon = """
-    <style>
-    .stApp { 
-      background: radial-gradient(1200px 600px at 10% -20%, #0b1f3f77 0%, transparent 60%),
-                  radial-gradient(1200px 600px at 90% 120%, #1c114fcc 0%, transparent 60%),
-                  linear-gradient(135deg, #050a1b 0%, #040a18 35%, #02030a 100%);
-    }
-    .outer-card {
-      background: rgba(0, 10, 30, 0.55);
-      box-shadow: 0 12px 34px rgba(0, 255, 255, 0.16), inset 0 0 0 1px rgba(0,255,255,.08);
-    }
-    h1, h2, h3, label, .stRadio, .stSelectbox, .stFileUploader, textarea, input, .stAlert { color: #eaf3ff !important; }
-    div.stButton > button { background: linear-gradient(90deg, #00eaff, #0077ff); color: #041121 !important; box-shadow: 0 0 14px #00eaff55; }
-    div.stButton > button:hover { box-shadow: 0 0 24px #00eaffaa; }
-    [data-testid="stSidebar"] { background: rgba(0,0,0,.35); }
-    .badge { background: #071b35; border:1px solid #2bdcff; color:#8fe9ff; }
-    </style>
-    """
-    glass = """
-    <style>
-    .stApp {
-      background: linear-gradient(135deg, #0c111b 0%, #0f1626 100%);
-    }
-    .outer-card {
-      background: rgba(255,255,255,0.08);
-      backdrop-filter: blur(14px);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.28);
-    }
-    h1, h2, h3, label, .stRadio, .stSelectbox, .stFileUploader, textarea, input, .stAlert { color: #eaf3ff !important; }
-    div.stButton > button { background: linear-gradient(90deg, #89f7fe 0%, #66a6ff 100%); color: #0c1020 !important; }
-    [data-testid="stSidebar"] { background: rgba(255,255,255,0.06); }
-    .badge { background: #ffffff12; border:1px solid #cde7ff66; color:#cfe7ff; }
-    </style>
-    """
-    minimal = """
-    <style>
-    .stApp { background: #0b0d13; }
-    .outer-card { background: #121521; box-shadow: 0 8px 28px rgba(0,0,0,.45); }
-    h1, h2, h3, label, .stRadio, .stSelectbox, .stFileUploader, textarea, input, .stAlert { color: #e0e6f5 !important; }
-    div.stButton > button { background: #2b63ff; color: #fff !important; }
-    [data-testid="stSidebar"] { background: #0e111a; }
-    .badge { background: #101320; border:1px solid #2b63ff66; color:#bcd1ff; }
-    </style>
-    """
-    st.markdown(common, unsafe_allow_html=True)
-    if theme.startswith("✨"): st.markdown(neon, unsafe_allow_html=True)
-    elif theme.startswith("🧊"): st.markdown(glass, unsafe_allow_html=True)
-    else: st.markdown(minimal, unsafe_allow_html=True)
+        # --- GEMINI AI ---
+        if run_ai:
+            st.session_state.ai_result_text = None
+            language_input = "Vietnamese" if "Việt" in lang else "English"
+            with st.spinner("🔮 " + ("Analyzing..." if lang == "English" else "Đang phân tích...")):
+                ai_result = analyze_document_ai(img_bytes, file_type="image", language=language_input)
+                if ai_result["success"]:
+                    st.session_state.ai_result_text = ai_result["text"]
+                else:
+                    st.error(ai_result["message"])
 
-inject_css(ui_theme)
+    # --- HIỂN THỊ KẾT QUẢ GEMINI ---
+    if "ai_result_text" in st.session_state and st.session_state.ai_result_text:
+        st.success("✅ " + ("Analysis Complete!" if lang == "English" else "Phân tích thành công!"))
 
-# ===================== TITLE =====================
-st.markdown("<div class='title-hero'>Universal OCR AI Suite</div>", unsafe_allow_html=True)
-st.markdown(
-    "<div class='title-sub'>Advanced AI-powered Extraction from <b>Image · PDF · Camera · Voice</b></div>",
-    unsafe_allow_html=True
-)
-st.markdown(
-    "<span class='badge'>⚡ Real-time</span><span class='badge'>🧪 Pro Scan</span><span class='badge'>🎙 Speech</span><span class='badge'>🧊 Multi-theme</span>",
-    unsafe_allow_html=True
-)
-
-# =============== Helper: pretty result box ===============
-def show_result_box(text: str, height: int = 320, filename: str = "ocr_result.txt"):
-    st.success("✅ " + ("Done! Detected text:" if lang == "English" else "Hoàn tất! Văn bản nhận được:"))
-    st.markdown(f"<div class='result-box' style='max-height:{height}px'>{text}</div>", unsafe_allow_html=True)
-    st.download_button(
-        "💾 " + ("Download text" if lang == "English" else "Tải kết quả"),
-        text, file_name=filename
-    )
-
-# ===================== MODES =====================
-
-# === IMAGE MODE ===
-if mode in ["📸 Ảnh", "📸 Image"]:
-    st.markdown("<div class='outer-card'>", unsafe_allow_html=True)
-    st.subheader("🖼️ " + ("Image to Text" if lang == "English" else "Chuyển Ảnh thành Văn bản"))
-    col1, col2, col3 = st.columns([1, 1, 1.2], vertical_alignment="top")
-
-    with col1:
-        uploaded_file = st.file_uploader(
-            "📤 " + ("Upload Image" if lang == "English" else "Tải lên ảnh"),
-            type=["png", "jpg", "jpeg"]
+        # 🌟 Thêm tùy chọn trích xuất văn bản
+        extract_mode = st.radio(
+            "🧠 " + ("Select text extraction mode:" if lang == "English" else "Chọn mức độ trích xuất văn bản:"),
+            ["📄 Full Text", "🏷️ Key Fields Only", "✅ Choose Manually"]
+            if lang == "English"
+            else ["📄 Lấy hết văn bản", "🏷️ Chỉ lấy trường đã phân loại", "✅ Chọn thủ công các trường"],
+            index=0
         )
-        if uploaded_file:
-            temp_path = "uploaded_image.png"
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.read())
 
-            if st.button("🧠 " + ("Recognize Text" if lang == "English" else "Nhận diện chữ"), use_container_width=True):
-                with st.spinner("🚀 " + ("AI is reading your image..." if lang == "English" else "AI đang xử lý ảnh...")):
-                    result = image_to_text(temp_path)
-                if result.get("success"):
-                    st.session_state["img_result"] = result.get("text", "")
-                else:
-                    st.error(result.get("message", "Error"))
+        lines = [line.strip() for line in st.session_state.ai_result_text.split("\n") if line.strip()]
 
-    with col2:
-        if uploaded_file:
-            st.image(temp_path, caption="Preview", use_column_width=True)
+        if extract_mode.startswith("📄") or extract_mode.startswith("Full"):
+            filtered_text = "\n".join(lines)
 
-    with col3:
-        if "img_result" in st.session_state:
-            show_result_box(st.session_state["img_result"], height=320, filename="image_result.txt")
-    st.markdown("</div>", unsafe_allow_html=True)
+        elif extract_mode.startswith("🏷️") or extract_mode.startswith("Key"):
+            filtered_text = "\n".join(line for line in lines if ":" in line)
 
-# === PDF MODE ===
-elif mode in ["📄 PDF", "📄 Pdf"]:
-    st.markdown("<div class='outer-card'>", unsafe_allow_html=True)
-    st.subheader("📄 " + ("PDF to Text" if lang == "English" else "Chuyển PDF thành Văn bản"))
-    uploaded_pdf = st.file_uploader(
-        "📁 " + ("Upload PDF file" if lang == "English" else "Tải lên file PDF"),
-        type=["pdf"]
-    )
+        else:  # ✅ chọn thủ công
+            key_value_lines = [line for line in lines if ":" in line]
+            selected_fields = []
+            st.write("🔍 " + ("Select fields to include:" if lang == "English" else "Chọn các trường muốn lấy:"))
+            for line in key_value_lines:
+                k, v = line.split(":", 1)
+                if st.checkbox(f"{k.strip()}: {v.strip()}", value=True):
+                    selected_fields.append(f"{k.strip()}: {v.strip()}")
+            filtered_text = "\n".join(selected_fields) if selected_fields else "(Không có trường nào được chọn)"
+
+        # --- Hiển thị kết quả sau lọc ---
+        st.text_area("📜 " + ("Filtered result:" if lang == "English" else "Kết quả sau lọc:"),
+                     filtered_text, height=400)
+
+        # --- Tải xuống ---
+        format_choice = st.radio("📥 " + ("Download as:" if lang == "English" else "Tải xuống định dạng:"),
+                                 ["TXT", "DOCX", "Excel"])
+
+        if format_choice == "TXT":
+            st.download_button("💾 TXT", filtered_text, file_name="ai_result_filtered.txt")
+
+        elif format_choice == "DOCX":
+            doc = Document()
+            doc.add_paragraph(filtered_text)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_doc:
+                doc.save(tmp_doc.name)
+                tmp_doc.seek(0)
+                st.download_button(
+                    "💾 DOCX",
+                    tmp_doc.read(),
+                    file_name="ai_result_filtered.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+
+        elif format_choice == "Excel":
+            rows = []
+            for line in filtered_text.split("\n"):
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    rows.append({"Trường": k.strip(), "Giá trị": v.strip()})
+            if rows:
+                df = pd.DataFrame(rows)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_xlsx:
+                    df.to_excel(tmp_xlsx.name, index=False)
+                    tmp_xlsx.seek(0)
+                    st.download_button(
+                        "💾 Excel",
+                        tmp_xlsx.read(),
+                        file_name="ai_result_filtered.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+
+# ============================================================
+# 📄 PDF MODE
+# ============================================================
+elif mode in ["📄 PDF"]:
+    uploaded_pdf = st.file_uploader("📁 " + ("Upload PDF file" if lang == "English" else "Tải lên file PDF"),
+                                    type=["pdf"])
     if uploaded_pdf:
-        temp_path = "uploaded_file.pdf"
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_pdf.read())
-        if st.button("🧠 " + ("Extract Text" if lang == "English" else "Nhận diện chữ từ PDF")):
-            with st.spinner("🚀 " + ("AI is reading your PDF..." if lang == "English" else "AI đang xử lý PDF...")):
-                result = pdf_to_text(temp_path)
-            if result.get("success"):
-                show_result_box(result.get("text", ""), height=360, filename="pdf_result.txt")
-            else:
-                st.error(result.get("message", "Error"))
-    st.markdown("</div>", unsafe_allow_html=True)
+        pdf_bytes = uploaded_pdf.read()
+        with open("temp_pdf.pdf", "wb") as f:
+            f.write(pdf_bytes)
 
-# === SCAN MODE ===
-elif mode in ["📷 Scan", "📷 Scan"]:
-    st.markdown("<div class='outer-card'>", unsafe_allow_html=True)
-    st.subheader("📷 Smart Document Scanner")
-    st.caption("Tip: " + ("Place paper flat, bright lighting, fill the frame."
-                           if lang == "English"
-                           else "Đặt giấy phẳng, đủ sáng, lấp đầy khung."))
+        col1, col2 = st.columns(2)
+        with col1:
+            run_ocr = st.button("🧠 " + ("OCR PDF" if lang == "English" else "Nhận diện PDF"))
+        with col2:
+            run_ai = st.button("🤖 " + ("Gemini Analysis" if lang == "English" else "Phân tích Gemini"))
 
-    # Tuỳ chọn hiển thị nhanh/chất lượng (không đổi pipeline gọi, chỉ hiển thị)
-    colq, colp = st.columns(2)
-    with colq:
-        quick = st.toggle("⚡ " + ("Quick preview" if lang == "English" else "Xem nhanh"), value=False)
-    with colp:
-        st.caption("🧪 " + ("Pro pipeline is auto-selected under the hood." if lang == "English" else "Pipeline Pro tự động thử nhiều cách."))
-
-    enable_cam = st.toggle("📷 " + ("Enable Camera" if lang == "English" else "Bật/Tắt Camera"))
-    if enable_cam:
-        camera_image = st.camera_input("📸 " + ("Take a picture" if lang == "English" else "Chụp ảnh"))
-        if camera_image is not None:
-            if st.button("🧠 " + ("Scan Text" if lang == "English" else "Nhận diện chữ từ ảnh đã chụp")):
-                with st.spinner("🚀 " + ("Enhancing & reading..." if lang == "English" else "Đang làm sạch & đọc...")):
-                    result = scan_to_text(camera_image.getvalue(), lang=lang)
-                if result.get("success"):
-                    show_result_box(result.get("text", ""), height=300, filename="scan_result.txt")
+        if run_ocr:
+            with st.spinner("📄 " + ("Processing PDF..." if lang == "English" else "Đang xử lý PDF...")):
+                result = pdf_to_text("temp_pdf.pdf")
+                if result["success"]:
+                    show_result_box(result["text"], filename="pdf_result.txt")
                 else:
-                    st.error(result.get("message", "Error"))
-    st.markdown("</div>", unsafe_allow_html=True)
+                    st.error(result["message"])
 
-# === SPEECH MODE ===
-elif mode in ["🎤 Giọng nói", "🎤 Speech"]:
-    st.markdown("<div class='outer-card'>", unsafe_allow_html=True)
-    st.subheader("🎙️ " + ("Speech to Text" if lang == "English" else "Chuyển Giọng nói thành Văn bản"))
-    choice = st.radio(
-        "🎧 " + ("Select method:" if lang == "English" else "Lựa chọn:"),
-        ["🎙️ " + ("Record directly" if lang == "English" else "Ghi âm trực tiếp"),
-         "📁 " + ("Upload audio file" if lang == "English" else "Tải lên file giọng nói")]
-    )
+        if run_ai:
+            language_input = "Vietnamese" if "Việt" in lang else "English"
+            with st.spinner("🔮 " + ("Analyzing PDF..." if lang == "English" else "Phân tích PDF...")):
+                ai_result = analyze_document_ai(pdf_bytes, file_type="pdf", language=language_input)
+                if ai_result["success"]:
+                    show_result_box(ai_result["text"], filename="ai_pdf.txt")
+                else:
+                    st.error(ai_result["message"])
 
-    # --- Record directly ---
-    if "Record" in choice or "Ghi âm" in choice:
+# ============================================================
+# 📷 SCAN MODE
+# ============================================================
+elif mode in ["📷 Scan"]:
+    st.caption("💡 " + ("Tip: Place paper flat, bright lighting." if lang == "English"
+                         else "Mẹo: Đặt giấy phẳng, đủ sáng khi chụp."))
+    cam = st.camera_input("📸 " + ("Take a picture" if lang == "English" else "Chụp ảnh"))
+    if cam:
+        img_bytes = cam.getvalue()
+        with st.spinner("🔍 " + ("Scanning..." if lang == "English" else "Đang quét...")):
+            result = scan_to_text(img_bytes, lang=lang)
+            if result["success"]:
+                show_result_box(result["text"], filename="scan_result.txt")
+            else:
+                st.error(result["message"])
+
+# ============================================================
+# 🎤 SPEECH MODE
+# ============================================================
+elif mode in ["🎤 Speech", "🎤 Giọng nói"]:
+    choice = st.radio("🎧 " + ("Select method:" if lang == "English" else "Chọn phương thức:"),
+                      ["🎙️ " + ("Record directly" if lang == "English" else "Ghi âm trực tiếp"),
+                       "📁 " + ("Upload file" if lang == "English" else "Tải file âm thanh")])
+
+    if "Record" in choice or "Ghi" in choice:
         audio = audiorecorder.audiorecorder(
-            "🎙️ " + ("Start recording" if lang == "English" else "Bắt đầu ghi âm"),
-            "🛑 " + ("Stop recording" if lang == "English" else "Dừng ghi âm")
+            "🎙️ " + ("Start Recording" if lang == "English" else "Bắt đầu ghi âm"),
+            "🛑 " + ("Stop" if lang == "English" else "Dừng")
         )
         if len(audio) > 0:
             buf = BytesIO()
@@ -301,35 +268,21 @@ elif mode in ["🎤 Giọng nói", "🎤 Speech"]:
             wav_bytes = buf.getvalue()
             st.audio(wav_bytes, format="audio/wav")
 
-            if st.button("🧠 " + ("Recognize Speech" if lang == "English" else "Nhận diện giọng nói")):
-                with st.spinner("🚀 " + ("Transcribing..." if lang == "English" else "Đang nhận diện...")):
-                    result = speech_to_text(audio_bytes=wav_bytes, lang=lang)
-                if result.get("success"):
-                    show_result_box(result.get("text", ""), height=280, filename="speech_result.txt")
+            if st.button("🧠 " + ("Transcribe Speech" if lang == "English" else "Nhận diện giọng nói")):
+                result = speech_to_text(audio_bytes=wav_bytes, lang=lang)
+                if result["success"]:
+                    show_result_box(result["text"], filename="speech_result.txt")
                 else:
-                    st.error(result.get("message", "Error"))
+                    st.error(result["message"])
 
-    # --- Upload audio file ---
-    elif "Upload" in choice or "Tải lên" in choice:
-        uploaded_audio = st.file_uploader(
-            "📁 " + ("Upload audio file" if lang == "English" else "Chọn file âm thanh"),
-            type=["wav", "mp3", "m4a", "aac", "ogg", "flac"]
-        )
-        if uploaded_audio:
-            st.audio(uploaded_audio)
-            if st.button("🧠 " + ("Recognize Speech" if lang == "English" else "Nhận diện file giọng nói")):
-                with st.spinner("🚀 " + ("Transcribing..." if lang == "English" else "Đang nhận diện...")):
-                    result = speech_to_text(uploaded_file=uploaded_audio, lang=lang)
-                if result.get("success"):
-                    show_result_box(result.get("text", ""), height=280, filename="uploaded_audio_result.txt")
+    else:
+        up = st.file_uploader("📁 " + ("Upload audio" if lang == "English" else "Chọn file âm thanh"),
+                              type=["wav", "mp3", "m4a", "aac", "ogg", "flac"])
+        if up:
+            st.audio(up)
+            if st.button("🧠 " + ("Recognize Audio" if lang == "English" else "Nhận diện âm thanh")):
+                result = speech_to_text(uploaded_file=up, lang=lang)
+                if result["success"]:
+                    show_result_box(result["text"], filename="uploaded_audio_result.txt")
                 else:
-                    st.error(result.get("message", "Error"))
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ===================== FOOTER =====================
-st.markdown(
-    "<div style='text-align:center; opacity:.6; font-size:12px; margin-top:10px;'>"
-    "UI ⚡ by Nhóm 1 — Powered by Streamlit"
-    "</div>",
-    unsafe_allow_html=True
-)
+                    st.error(result["message"])
